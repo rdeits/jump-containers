@@ -25,6 +25,13 @@ struct Affine <: AbstractFunction
     constant::Float64
 end
 
+build_constraint(s::Variable, f::LessThan) = Float64[s.idx, f.upper]
+build_constraint(s::Variable, f::GreaterThan) = Float64[s.idx, f.lower]
+build_constraint(s::Variable, f::Interval) = Float64[f.lower, s.idx, f.upper]
+build_constraint(s::Affine, f::LessThan) = Float64[s.constant, f.upper]
+build_constraint(s::Affine, f::GreaterThan) = Float64[s.constant, f.lower]
+build_constraint(s::Affine, f::Interval) = Float64[f.lower, s.constant, f.upper]
+
 """
 A fully specialized container type, which should be
 fast, but will only support a fixed set of constraints
@@ -48,7 +55,28 @@ for (field, types) in [
     (:agt, Tuple{Affine, GreaterThan})
     (:ain, Tuple{Affine, Interval})
         ]
-    @eval addconstraint!(c::SpecializedContainer, (f, s)::$(types)) = push!(c.$(field), (f, s))
+    @eval addconstraint!(c::SpecializedContainer, fs::$(types)) = push!(c.$(field), (fs[1], fs[2]))
+end
+
+function eachconstraint(f, c::SpecializedContainer)
+    for constraint in c.vlt
+        f(constraint)
+    end
+    for constraint in c.vgt
+        f(constraint)
+    end
+    for constraint in c.vin
+        f(constraint)
+    end
+    for constraint in c.alt
+        f(constraint)
+    end
+    for constraint in c.agt
+        f(constraint)
+    end
+    for constraint in c.ain
+        f(constraint)
+    end
 end
 
 """
@@ -61,11 +89,18 @@ end
 
 TypeContainer() = TypeContainer(Dict())
 
-function addconstraint!(c::TypeContainer, (f, s)::Tuple{F, S}) where {F <: AbstractFunction, S <: AbstractSet}
+function addconstraint!(c::TypeContainer, fs::Tuple{F, S}) where {F <: AbstractFunction, S <: AbstractSet}
+    f, s = fs
     v = get!(c.constraints, (F, S)) do
         Vector{Tuple{F, S}}()
     end::Vector{Tuple{F, S}}
     push!(v, (f, s))
+end
+
+function eachconstraint(f, c::TypeContainer)
+    for v in values(c.constraints)
+        foreach(f, v)
+    end
 end
 
 """
@@ -78,11 +113,18 @@ end
 
 IDContainer() = IDContainer(Dict())
 
-function addconstraint!(c::IDContainer, (f, s)::Tuple{F, S}) where {F <: AbstractFunction, S <: AbstractSet}
+function addconstraint!(c::IDContainer, fs::Tuple{F, S}) where {F <: AbstractFunction, S <: AbstractSet}
+    f, s = fs
     v = get!(c.constraints, (object_id(F), object_id(S))) do
         Vector{Tuple{F, S}}()
     end::Vector{Tuple{F, S}}
     push!(v, (f, s))
+end
+
+function eachconstraint(f, c::IDContainer)
+    for v in values(c.constraints)
+        foreach(f, v)
+    end
 end
 
 """
@@ -96,7 +138,7 @@ end
 
 IDVectContainer() = IDVectContainer([], [])
 
-function get_slot!(c::IDVectContainer, (f, s)::Tuple{F, S}) where {F <: AbstractFunction, S <: AbstractSet}
+function get_slot!(c::IDVectContainer, ::Tuple{F, S}) where {F <: AbstractFunction, S <: AbstractSet}
     key = (object_id(F), object_id(S))
     @inbounds for i in 1:length(c.keys)
         if c.keys[i] === key
@@ -110,8 +152,14 @@ function get_slot!(c::IDVectContainer, (f, s)::Tuple{F, S}) where {F <: Abstract
 end
 
 
-function addconstraint!(c::IDVectContainer, (f, s)::Tuple{F, S}) where {F <: AbstractFunction, S <: AbstractSet}
-    push!(get_slot!(c, (f, s)), (f, s))
+function addconstraint!(c::IDVectContainer, fs::Tuple{F, S}) where {F <: AbstractFunction, S <: AbstractSet}
+    push!(get_slot!(c, fs), fs)
+end
+
+function eachconstraint(f, c::IDVectContainer)
+    for v in c.constraints
+        foreach(f, v)
+    end
 end
 
 """
@@ -124,7 +172,9 @@ end
 
 ErasedContainer() = ErasedContainer([])
 
-addconstraint!(c::ErasedContainer, (f, s)) = push!(c.constraints, (f, s))
+addconstraint!(c::ErasedContainer, fs::Tuple) = push!(c.constraints, fs)
+
+eachconstraint(f, c::ErasedContainer) = foreach(f, c.constraints)
 
 
 #################################################
@@ -139,11 +189,38 @@ function add_some_constraints!(c)
     for i in 1:100
         addconstraint!(c, (Variable(1), LessThan(2.0)))
     end
+    for i in 1:10
+        addconstraint!(c, (Affine([1, 2], [1.0, 2.0], 3.0), GreaterThan(-1.0)))
+    end
+end
+
+function process_constraints(c)
+    result = Vector{Vector{Float64}}()
+    eachconstraint(c) do constraint
+        push!(result, build_constraint(constraint[1], constraint[2]))
+    end
+    result
 end
 
 using BenchmarkTools
 
+# Test that all the containers actually store the same data
+for container in [TypeContainer, IDContainer, IDVectContainer, ErasedContainer]
+    reference = SpecializedContainer()
+    add_some_constraints!(reference)
+    expected = process_constraints(reference)
+
+    m = container()
+    add_some_constraints!(m)
+    @assert sort(process_constraints(m), by=Tuple) == sort(expected, by=Tuple)
+end
+
 for container in [SpecializedContainer, TypeContainer, IDContainer, IDVectContainer, ErasedContainer]
     @show container
+    print("Adding constraints: \t")
     @btime add_some_constraints!(m) setup=(m=$container()) evals=1
+    print("Iterating over constraints: \t")
+    @btime process_constraints(m) setup=(m=$container(); add_some_constraints!(m)) evals=1
+    print("Identity map over constraints: \t")
+    @btime eachconstraint(identity, m) setup=(m=$container(); add_some_constraints!(m)) evals=1
 end
