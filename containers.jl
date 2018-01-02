@@ -221,6 +221,6 @@ for container in [SpecializedContainer, TypeContainer, IDContainer, IDVectContai
     @btime add_some_constraints!(m) setup=(m=$container()) evals=1
     print("Iterating over constraints: \t")
     @btime process_constraints(m) setup=(m=$container(); add_some_constraints!(m)) evals=1
-    print("Identity map over constraints: \t")
-    @btime eachconstraint(identity, m) setup=(m=$container(); add_some_constraints!(m)) evals=1
+    # print("Identity map over constraints: \t")
+    # @btime eachconstraint(identity, m) setup=(m=$container(); add_some_constraints!(m)) evals=1
 end
