@@ -1,5 +1,11 @@
 using TypeSortedCollections
 
+@static if VERSION < v"0.7.0-DEV.3580"
+    _objectid(x) = object_id(x)
+else
+    _objectid(x) = objectid(x)
+end
+
 abstract type AbstractSet end
 
 struct LessThan <: AbstractSet
@@ -117,7 +123,7 @@ IDContainer() = IDContainer(Dict())
 
 function addconstraint!(c::IDContainer, fs::Tuple{F, S}) where {F <: AbstractFunction, S <: AbstractSet}
     f, s = fs
-    v = get!(c.constraints, (object_id(F), object_id(S))) do
+    v = get!(c.constraints, (_objectid(F), _objectid(S))) do
         Vector{Tuple{F, S}}()
     end::Vector{Tuple{F, S}}
     push!(v, (f, s))
@@ -141,7 +147,7 @@ end
 IDVectContainer() = IDVectContainer([], [])
 
 function get_slot!(c::IDVectContainer, ::Tuple{F, S}) where {F <: AbstractFunction, S <: AbstractSet}
-    key = (object_id(F), object_id(S))
+    key = (_objectid(F), _objectid(S))
     @inbounds for i in 1:length(c.keys)
         if c.keys[i] === key
             return c.constraints[i]::Vector{Tuple{F, S}}
