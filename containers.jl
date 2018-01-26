@@ -1,3 +1,5 @@
+using TypeSortedCollections
+
 abstract type AbstractSet end
 
 struct LessThan <: AbstractSet
@@ -176,6 +178,24 @@ addconstraint!(c::ErasedContainer, fs::Tuple) = push!(c.constraints, fs)
 
 eachconstraint(f, c::ErasedContainer) = foreach(f, c.constraints)
 
+"""
+Uses a TypeSortedCollection to store the constraints.
+"""
+mutable struct TypeSortedContainer
+    constraints::TypeSortedCollection
+    TypeSortedContainer() = new(TypeSortedCollection{Tuple{}}())
+end
+
+function addconstraint!(c::TypeSortedContainer, fs::Tuple{F, S}) where {F <: AbstractFunction, S <: AbstractSet}
+    if fs isa eltype(c.constraints)
+        push!(c.constraints, fs)
+    else
+        c.constraints = vcat(c.constraints, fs)
+    end
+end
+
+eachconstraint(f, c::TypeSortedContainer) = _eachconstraint(f, c.constraints)
+@noinline _eachconstraint(f, constraints::TypeSortedCollection) = foreach(f, constraints)
 
 #################################################
 ################ Benchmarks #####################
@@ -205,7 +225,8 @@ end
 using BenchmarkTools
 
 # Test that all the containers actually store the same data
-for container in [TypeContainer, IDContainer, IDVectContainer, ErasedContainer]
+containers = [SpecializedContainer, TypeContainer, IDContainer, IDVectContainer, ErasedContainer, TypeSortedContainer]
+for container in setdiff(containers, (SpecializedContainer, ))
     reference = SpecializedContainer()
     add_some_constraints!(reference)
     expected = process_constraints(reference)
@@ -215,7 +236,7 @@ for container in [TypeContainer, IDContainer, IDVectContainer, ErasedContainer]
     @assert sort(process_constraints(m), by=Tuple) == sort(expected, by=Tuple)
 end
 
-for container in [SpecializedContainer, TypeContainer, IDContainer, IDVectContainer, ErasedContainer]
+for container in containers
     @show container
     print("Adding constraints: \t")
     @btime add_some_constraints!(m) setup=(m=$container()) evals=1
