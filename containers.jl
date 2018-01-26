@@ -187,12 +187,15 @@ mutable struct TypeSortedContainer
 end
 
 function addconstraint!(c::TypeSortedContainer, fs::Tuple{F, S}) where {F <: AbstractFunction, S <: AbstractSet}
-    if fs isa eltype(c.constraints)
-        push!(c.constraints, fs)
-    else
-        c.constraints = vcat(c.constraints, fs)
-    end
+    _addconstraint!(c, c.constraints, fs)
+    nothing
 end
+
+@noinline _addconstraint!(c::TypeSortedContainer, constraints::TypeSortedCollection, fs) = _addconstraint!(c, constraints, eltype(constraints), fs)
+@inline _addconstraint!(c::TypeSortedContainer, constraints::TypeSortedCollection, ::Type{T}, fs::FS) where {T, FS<:T} = (push!(c.constraints, fs); nothing)
+@inline _addconstraint!(c::TypeSortedContainer, ::TypeSortedCollection, ::Type, fs) = (c.constraints = vcat(c.constraints, fs); nothing)
+
+
 
 eachconstraint(f, c::TypeSortedContainer) = _eachconstraint(f, c.constraints)
 @noinline _eachconstraint(f, constraints::TypeSortedCollection) = foreach(f, constraints)
